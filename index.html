@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Mine-s-Hexagon（スコア版）</title>
+<title>Mine-s-Hexagon（完成版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 body {
@@ -68,6 +68,7 @@ text-shadow:0 0 3px black;
 <div id="gameArea" class="hidden">
 <div id="status"></div>
 <div id="game"></div>
+<button id="hintBtn" onclick="useHint()">ヒント（1回）</button>
 <button id="undoBtn" class="hidden">一回戻る</button>
 <button id="backBtn" class="hidden" onclick="goMenu()">メニューへ</button>
 </div>
@@ -80,10 +81,11 @@ let undoUsed=false,lastSafeState=null;
 let currentMode="";
 let flagMistakes=0;
 let unflagUsed=0;
+let hintUsed=false;
 
 const game=document.getElementById("game");
 
-// ===== スコア計算 =====
+// ===== スコア =====
 function calculateScore(){
 let base = unflagUsed;
 if(flagMistakes === 0) base -= 3;
@@ -102,14 +104,14 @@ return "🥉 C";
 function savePlayData(score, isNoMiss, rank){
 let key = "stats_" + currentMode;
 let data = JSON.parse(localStorage.getItem(key)) || {
-    plays:0,totalScore:0,best:null,sCount:0,noMiss:0
+plays:0,totalScore:0,best:null,sCount:0,noMiss:0
 };
 
 data.plays++;
 data.totalScore += score;
 
 if(data.best === null || score < data.best){
-    data.best = score;
+data.best = score;
 }
 
 if(rank.includes("S")) data.sCount++;
@@ -126,20 +128,20 @@ document.getElementById("menu").classList.add("hidden");
 document.getElementById("gameArea").classList.remove("hidden");
 
 if(mode==="normal"){
-    size=7;
-    bombCount=Math.floor(size*size*0.20);
+size=7;
+bombCount=Math.floor(size*size*0.20);
 }
 if(mode==="hard"){
-    size=9;
-    bombCount=Math.floor(size*size*0.25);
+size=9;
+bombCount=Math.floor(size*size*0.25);
 }
 if(mode==="expert"){
-    size=11;
-    bombCount=Math.floor(size*size*0.30);
+size=11;
+bombCount=Math.floor(size*size*0.30);
 }
 if(mode==="remaster"){
-    size=13;
-    bombCount=Math.floor(size*size*0.33);
+size=13;
+bombCount=Math.floor(size*size*0.33);
 }
 
 initGame();
@@ -153,9 +155,11 @@ undoUsed=false;lastSafeState=null;
 
 flagMistakes=0;
 unflagUsed=0;
+hintUsed=false;
 
 document.getElementById("undoBtn").classList.add("hidden");
 document.getElementById("backBtn").classList.add("hidden");
+document.getElementById("hintBtn").disabled=false;
 
 updateStatus();
 
@@ -288,7 +292,7 @@ el.classList.add("n"+cell.count);
 checkClear();
 }
 
-// ===== フラグ =====
+// ===== フラグ（ミス累積）=====
 function toggleFlag(i){
 const c=board[i];
 if(c.open)return;
@@ -300,24 +304,44 @@ c.flag=true;
 el.classList.add("flag");
 el.textContent="🚩";
 
-if(!c.bomb) flagMistakes++;
+if(!c.bomb) flagMistakes++; // 累積
+
 }else{
 unflagUsed++;
 
 c.flag=false;
 el.classList.remove("flag");
 el.textContent="";
-
-if(!c.bomb) flagMistakes--;
 }
 
 updateStatus();
 }
 
+// ===== ヒント =====
+function useHint(){
+if(hintUsed||gameOver)return;
+
+hintUsed=true;
+document.getElementById("hintBtn").disabled=true;
+
+let safeCells=board.map((c,i)=>({c,i}))
+.filter(x=>!x.c.bomb&&!x.c.open);
+
+if(safeCells.length===0)return;
+
+let pick=safeCells[Math.floor(Math.random()*safeCells.length)].i;
+
+openCell(pick);
+
+let el=getCellEl(pick);
+el.style.boxShadow="0 0 15px yellow";
+setTimeout(()=>{el.style.boxShadow="";},800);
+}
+
 // ===== ステータス =====
 function updateStatus(){
 document.getElementById("status").textContent=
-`🏆 スコア:${unflagUsed} | ❌ミス:${flagMistakes}`;
+`🏆 スコア:${unflagUsed} | ❌ミス:${flagMistakes} | 💡ヒント:${hintUsed?"使用済":"未使用"}`;
 }
 
 // ===== 終了 =====
@@ -363,20 +387,18 @@ document.getElementById("backBtn").classList.add("hidden");
 function checkClear(){
 if(board.every(c=>c.open||c.bomb)){
 
-let score = calculateScore();
-let rank = getRank(score);
-let isNoMiss = (flagMistakes === 0);
+let score=calculateScore();
+let rank=getRank(score);
+let isNoMiss=(flagMistakes===0);
 
-savePlayData(score, isNoMiss, rank);
+savePlayData(score,isNoMiss,rank);
 
-let bonusText = isNoMiss ? "✨ノーミスボーナス！" : "";
+let bonus=isNoMiss?"✨ノーミスボーナス！":"";
 
-endGame(
-`🎉 クリア！
-🏆 スコア: ${score}
-${bonusText}
-🏅 ランク: ${rank}`
-);
+endGame(`🎉 クリア！
+🏆 スコア:${score}
+${bonus}
+🏅 ランク:${rank}`);
 }
 }
 
@@ -387,25 +409,24 @@ document.getElementById("gameArea").classList.add("hidden");
 showStats();
 }
 
-// ===== 履歴表示 =====
+// ===== 履歴 =====
 function showStats(){
 const modes=["normal","hard","expert","remaster"];
 let text="📊 プレイ履歴<br>";
 
 modes.forEach(m=>{
-let data = JSON.parse(localStorage.getItem("stats_"+m));
-
+let data=JSON.parse(localStorage.getItem("stats_"+m));
 if(data){
-let avg = Math.round(data.totalScore / data.plays * 100) / 100;
+let avg=Math.round(data.totalScore/data.plays*100)/100;
 
-text += `
+text+=`
 <hr>
 <b>${m}</b><br>
-回数: ${data.plays}<br>
-ベスト: ${data.best}<br>
-平均: ${avg}<br>
-Sランク: ${data.sCount}<br>
-ノーミス: ${data.noMiss}<br>
+回数:${data.plays}<br>
+ベスト:${data.best}<br>
+平均:${avg}<br>
+Sランク:${data.sCount}<br>
+ノーミス:${data.noMiss}<br>
 `;
 }
 });
@@ -420,9 +441,10 @@ alert(`操作方法
 タップ → 開く
 長押し → フラグ
 
-スコアルール:
+ルール:
 フラグ解除回数が少ないほど高評価
-ノーミスでボーナスあり
+ミスは累積（戻せない）
+ヒントは1回だけ使える
 `);
 }
 
@@ -442,3 +464,4 @@ showStats();
 
 </body>
 </html>
+
